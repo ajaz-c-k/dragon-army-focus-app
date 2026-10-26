@@ -1,0 +1,852 @@
+import SwiftUI
+import SwiftData
+import UserNotifications
+
+struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @Query(sort: \Dragon.createdAt) private var dragons: [Dragon]
+    @Query(sort: \FocusSession.startedAt, order: .reverse) private var sessions: [FocusSession]
+    @Query(sort: \KingdomItem.plantedAt) private var kingdomItems: [KingdomItem]
+    @AppStorage("focusDurationMinutes") private var focusDurationMinutes = 25
+    @AppStorage("dailyGoalMinutes") private var dailyGoalMinutes = 60
+    @AppStorage("activeFocusRunning") private var activeFocusRunning = false
+    @AppStorage("activeFocusStartTime") private var activeFocusStartTime = 0.0
+    @AppStorage("activeFocusSessionStartTime") private var activeFocusSessionStartTime = 0.0
+    @AppStorage("activeFocusElapsedSeconds") private var activeFocusElapsedSeconds = 0.0
+    @AppStorage("activeFocusTotalSeconds") private var activeFocusTotalSeconds = 0
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("dragonExplorerName") private var explorerName = "Dragon Keeper"
+    @State private var selectedTab = 0
+    @State private var remainingSeconds = 25 * 60
+    @State private var sessionTotalSeconds = 25 * 60
+    @State private var timerRunning = false
+    @State private var showingCompletion = false
+    @State private var showingSettings = false
+    @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var dragon: Dragon? { dragons.first }
+    private var minutesFocused: Int { sessions.filter(\.completed).reduce(0) { $0 + $1.durationMinutes } }
+    private var unlockedSpecies: Set<String> { Set(dragons.map(\.speciesID)) }
+    private var explorerDisplayName: String {
+        let trimmed = explorerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Dragon Keeper" : trimmed
+    }
+    private var dragonColorOptions: [(name: String, hex: String)] {
+        [("Ruby", "E85D4A"), ("Azure", "4C9ED9"), ("Moss", "5D9B67"), ("Sunstone", "E5A83B"), ("Moon", "7B6BB4"), ("Crystal", "57B9B1")]
+    }
+
+    var body: some View {
+        Group {
+            if hasCompletedOnboarding {
+                TabView(selection: $selectedTab) {
+                    dashboardView.tag(0).tabItem { Label("Dashboard", systemImage: "chart.bar.xaxis") }
+                    focusView.tag(1).tabItem { Label("Focus", systemImage: "timer") }
+                    collectionView.tag(2).tabItem { Label("Dragons", systemImage: "flame.fill") }
+                    lakeView.tag(3).tabItem { Label("Lake", systemImage: "water.waves") }
+                }
+            } else {
+                DragonOnboardingView {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        hasCompletedOnboarding = true
+                    }
+                }
+            }
+        }
+        .tint(DragonTheme.coral)
+        .onAppear {
+            seedIfNeeded()
+            restoreTimerState()
+        }
+        .onChange(of: focusDurationMinutes) { _, newValue in
+            guard !timerRunning else { return }
+            sessionTotalSeconds = newValue * 60
+            remainingSeconds = sessionTotalSeconds
+        }
+        .onReceive(timer) { _ in tick() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { restoreTimerState() }
+        }
+        .alert("Focus complete", isPresented: $showingCompletion) {
+            Button("Keep growing") { }
+        } message: {
+                        Text("Your dragon gained XP, the lake expanded, and a new discovery was added.")
+        }
+        .sheet(isPresented: $showingSettings) {
+            TimerSettingsView(
+                durationMinutes: $focusDurationMinutes,
+                dailyGoalMinutes: $dailyGoalMinutes,
+                isTimerRunning: timerRunning
+            )
+        }
+        .preferredColorScheme(.light)
+    }
+
+    private var dashboardView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    dashboardHeader
+                    dashboardHero
+                    dashboardMetrics
+                    consistencyCard
+                    analyticsCard
+                    medalsCard
+                }
+                .padding(20)
+            }
+            .background(DragonTheme.cream.ignoresSafeArea())
+            .navigationTitle("Today")
+        }
+    }
+
+    private var dashboardHeader: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Welcome back, \(explorerDisplayName)")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+            Text("Your focus command center")
+                .font(.headline)
+            Text("Small, consistent sessions build a stronger dragon army.")
+                .font(.subheadline)
+                .foregroundStyle(DragonTheme.ink.opacity(0.62))
+        }
+    }
+
+    private var dashboardHero: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle().stroke(DragonTheme.coral.opacity(0.14), lineWidth: 12)
+                Circle().trim(from: 0, to: CGFloat(min(Double(todayMinutes) / Double(max(dailyGoalMinutes, 1)), 1)))
+                    .stroke(DragonTheme.coral, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(todayMinutes)m").font(.title3.bold()).monospacedDigit()
+            }
+            .frame(width: 92, height: 92)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Today's focus goal").font(.headline)
+                Text("\(max(0, dailyGoalMinutes - todayMinutes)) minutes left")
+                    .font(.subheadline).foregroundStyle(DragonTheme.ink.opacity(0.62))
+                Text("\(currentStreak)-day streak")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(DragonTheme.coralDark)
+            }
+            Spacer()
+        }
+        .dragonCard()
+    }
+
+    private var dashboardMetrics: some View {
+        HStack(spacing: 10) {
+            DashboardMetric(value: "\(minutesFocused)m", label: "all-time focus", icon: "clock.fill")
+            DashboardMetric(value: "\(sessions.filter(\.completed).count)", label: "sessions", icon: "checkmark.circle.fill")
+            DashboardMetric(value: "\(dragons.count)/\(DragonSpecies.all.count)", label: "dragons", icon: "flame.fill")
+        }
+    }
+
+    private var consistencyCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Consistency").font(.headline)
+                Spacer()
+                Text("last 7 days").font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.55))
+            }
+            HStack(alignment: .bottom, spacing: 10) {
+                ForEach(Array(weeklyMinutes.enumerated()), id: \.offset) { index, minutes in
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(minutes > 0 ? DragonTheme.coral : DragonTheme.ink.opacity(0.12))
+                            .frame(maxWidth: .infinity, minHeight: 8, maxHeight: CGFloat(max(8, Double(minutes) / Double(max(weeklyMax, 1)) * 86)))
+                        Text(weekdayLabels[index]).font(.caption2).foregroundStyle(DragonTheme.ink.opacity(0.55))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                }
+            }
+            Text("\(currentStreak) consecutive day\(currentStreak == 1 ? "" : "s") active")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(DragonTheme.coralDark)
+        }
+        .dragonCard()
+    }
+
+    private var medalsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Medals").font(.headline)
+                Spacer()
+                Text("\(earnedMedals.count)/\(FocusMedal.all.count)").font(.subheadline.bold()).foregroundStyle(DragonTheme.coral)
+            }
+            ForEach(FocusMedal.all) { medal in
+                MedalRow(medal: medal, earned: earnedMedals.contains(medal.id))
+            }
+        }
+        .dragonCard()
+    }
+
+    private var analyticsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Performance snapshot").font(.headline)
+                Spacer()
+                Text("this week").font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.55))
+            }
+            HStack(spacing: 10) {
+                DashboardMetric(value: "\(weeklyMinutes.reduce(0, +))m", label: "this week", icon: "calendar")
+                DashboardMetric(value: "\(averageSessionMinutes)m", label: "average session", icon: "chart.line.uptrend.xyaxis")
+                DashboardMetric(value: "\(goalDays)/7", label: "goal days", icon: "target")
+            }
+            Text(bestFocusDayMessage)
+                .font(.caption)
+                .foregroundStyle(DragonTheme.ink.opacity(0.58))
+        }
+        .dragonCard()
+    }
+
+    private var focusView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    header
+                    timerCard
+                    statsRow
+                    tipCard
+                }
+                .padding(20)
+            }
+            .background(DragonTheme.cream.ignoresSafeArea())
+            .navigationTitle("Dragon Army")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                    .accessibilityLabel("Focus timer settings")
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Welcome, \(explorerDisplayName)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DragonTheme.coralDark)
+                Text("Peaceful focus,")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("powerful dragons.")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(DragonTheme.coral)
+                Text("Expand your lake and dragon collection one focused minute at a time.")
+                    .font(.subheadline)
+                    .foregroundStyle(DragonTheme.ink.opacity(0.62))
+            }
+            Spacer()
+            Image(systemName: "sparkles")
+                .font(.title2)
+                .foregroundStyle(DragonTheme.gold)
+                .padding(12)
+                .background(.white.opacity(0.75), in: Circle())
+        }
+    }
+
+    private var timerCard: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle().stroke(DragonTheme.coral.opacity(0.14), lineWidth: 18)
+                Circle().trim(from: 0, to: CGFloat(timerProgress)).stroke(DragonTheme.coral, style: StrokeStyle(lineWidth: 18, lineCap: .round)).rotationEffect(.degrees(-90))
+                VStack(spacing: 3) {
+                    Text(timeString).font(.system(size: 48, weight: .bold, design: .rounded)).monospacedDigit()
+                    Text(timerRunning ? "Focus in progress" : "Ready when you are")
+                        .font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.55))
+                }
+            }
+            .frame(height: 230)
+            Button(timerRunning ? "Pause focus" : "Start \(focusDurationMinutes)-minute focus") {
+                toggleTimer()
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            if !timerRunning && remainingSeconds < sessionTotalSeconds {
+                Button("End session early") { finishSession() }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(DragonTheme.coralDark)
+            }
+            Text("Timer length: \(focusDurationMinutes) minutes · Change it with ⚙︎")
+                .font(.caption)
+                .foregroundStyle(DragonTheme.ink.opacity(0.52))
+        }
+        .frame(maxWidth: .infinity)
+        .dragonCard()
+    }
+
+    private var statsRow: some View {
+        HStack(spacing: 12) {
+            StatTile(value: "\(minutesFocused)m", label: "focused")
+            StatTile(value: "\(kingdomItems.count)", label: "lake discoveries")
+            StatTile(value: "\(dragons.count)/\(DragonSpecies.all.count)", label: "dragons")
+        }
+    }
+
+    private var tipCard: some View {
+        HStack(spacing: 14) {
+            Text("🌱").font(.largeTitle)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your next reward").font(.headline)
+                Text(nextDragonMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(DragonTheme.ink.opacity(0.62))
+            }
+        }
+        .dragonCard()
+    }
+
+    private var nextDragonMessage: String {
+        guard let next = DragonSpecies.all.first(where: { !unlockedSpecies.contains($0.id) }) else {
+            return "You have unlocked every dragon in this MVP collection."
+        }
+        return "Focus \(max(0, next.unlockMinutes - minutesFocused)) more minutes to discover \(next.name)."
+    }
+
+    private var collectionView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Dragon Army").font(.title.bold())
+                            Text("\(dragons.count) unlocked · \(DragonSpecies.all.count - dragons.count) still to discover")
+                                .font(.subheadline).foregroundStyle(DragonTheme.ink.opacity(0.62))
+                        }
+                        Spacer()
+                        Text("\(dragons.count)/\(DragonSpecies.all.count)")
+                            .font(.title2.bold()).foregroundStyle(DragonTheme.coral)
+                    }
+                    .dragonCard()
+
+                    if let dragon {
+                        DragonSceneView(stage: dragon.stage, colorHex: dragon.colorHex)
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(dragon.name).font(.title2.bold())
+                                    Text(dragon.stage.title).font(.subheadline.weight(.semibold)).foregroundStyle(DragonTheme.coral)
+                                }
+                                Spacer()
+                                Text("\(dragon.experience) XP").font(.headline.monospacedDigit())
+                            }
+                            ProgressView(value: dragon.progress).tint(DragonTheme.coral)
+                            Text(dragon.stage.next.map { "\(max(0, dragon.stage.requiredXP - dragon.experience)) XP until \($0.title)" } ?? "Your dragon has reached its final MVP form")
+                                .font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.58))
+                            TextField("Dragon name", text: Binding(
+                                get: { dragon.name },
+                                set: { dragon.name = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            Text("Dragon colors").font(.subheadline.bold())
+                            HStack(spacing: 12) {
+                                ForEach(dragonColorOptions, id: \.hex) { option in
+                                    Button {
+                                        dragon.colorHex = option.hex
+                                        try? modelContext.save()
+                                    } label: {
+                                        Circle()
+                                            .fill(Color(hex: option.hex))
+                                            .frame(width: 30, height: 30)
+                                            .overlay {
+                                                Circle().stroke(dragon.colorHex == option.hex ? DragonTheme.ink : .clear, lineWidth: 3)
+                                            }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(option.name)
+                                }
+                            }
+                        }
+                        .dragonCard()
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Collection progress").font(.headline)
+                        ForEach(DragonSpecies.all) { species in
+                            DragonSpeciesRow(species: species, unlocked: unlockedSpecies.contains(species.id), minutesFocused: minutesFocused)
+                        }
+                    }
+                    .dragonCard()
+                }
+                .padding(20)
+            }
+            .background(DragonTheme.cream.ignoresSafeArea())
+            .navigationTitle("Dragon Collection")
+        }
+    }
+
+    private var lakeView: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.17, green: 0.45, blue: 0.62), DragonTheme.sky, DragonTheme.mint.opacity(0.8)], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Azuremere Lake").font(.title.bold()).foregroundStyle(.white)
+                                Text("A peaceful home where your dragons gather.").foregroundStyle(.white.opacity(0.82))
+                            }
+                            Spacer()
+                            Text("Level \(lakeLevel)").font(.headline).foregroundStyle(.white).padding(10).background(.white.opacity(0.18), in: Capsule())
+                        }
+                        lakeHero
+                        Text("Lake projects").font(.headline).foregroundStyle(.white)
+                        VStack(spacing: 10) {
+                            ForEach(LakeProject.all) { project in
+                                LakeProjectRow(project: project, unlocked: lakeLevel >= project.requiredLevel)
+                            }
+                        }
+                        Text("Dragon bays").font(.headline).foregroundStyle(.white)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            ForEach(dragons) { dragon in
+                                LakeDragonCard(dragon: dragon)
+                            }
+                        }
+                        Text("Lake discoveries").font(.headline).foregroundStyle(.white)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                            ForEach(kingdomItems.filter { $0.kind == "lake" || $0.kind == "tree" }) { item in
+                                KingdomTile(item: item)
+                            }
+                        }
+                        if kingdomItems.filter({ $0.kind == "lake" }).isEmpty {
+                            Text("Complete a focus session to create your first lake expansion.")
+                                .font(.subheadline).foregroundStyle(.white.opacity(0.82))
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+            .navigationTitle("Azuremere Lake")
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+    }
+
+    private var lakeHero: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(LinearGradient(colors: [Color.white.opacity(0.30), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            VStack(spacing: 8) {
+                Text("🌊").font(.system(size: 64))
+                Text("\(kingdomItems.filter { $0.kind == "lake" }.count) lake expansions")
+                    .font(.headline).foregroundStyle(.white)
+                Text("Every focused session makes the lake wider and brighter.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.78))
+            }
+        }
+        .frame(height: 170)
+    }
+
+    private var todayMinutes: Int {
+        sessions.filter { session in
+            session.completed && Calendar.current.isDateInToday(session.startedAt)
+        }.reduce(0) { $0 + $1.durationMinutes }
+    }
+
+    private var currentStreak: Int {
+        let calendar = Calendar.current
+        let activeDays = Set(sessions.filter(\.completed).map { calendar.startOfDay(for: $0.startedAt) })
+        var day = calendar.startOfDay(for: .now)
+        var streak = 0
+        while activeDays.contains(day) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+
+    private var weeklyMinutes: [Int] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        return (0..<7).map { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset - 6, to: today) else { return 0 }
+            return sessions.filter { session in
+                session.completed && calendar.isDate(session.startedAt, inSameDayAs: day)
+            }.reduce(0) { $0 + $1.durationMinutes }
+        }
+    }
+
+    private var weeklyMax: Int { max(weeklyMinutes.max() ?? 0, 1) }
+    private var weekdayLabels: [String] { ["M", "T", "W", "T", "F", "S", "S"] }
+    private var lakeLevel: Int { max(1, min(10, kingdomItems.filter { $0.kind == "lake" }.count + 1)) }
+
+    private var averageSessionMinutes: Int {
+        let completed = sessions.filter(\.completed)
+        guard !completed.isEmpty else { return 0 }
+        return completed.reduce(0) { $0 + $1.durationMinutes } / completed.count
+    }
+
+    private var goalDays: Int {
+        weeklyMinutes.filter { $0 >= dailyGoalMinutes }.count
+    }
+
+    private var bestFocusDayMessage: String {
+        guard let best = weeklyMinutes.max(), best > 0 else { return "Complete a session to start building your personal focus pattern." }
+        return "Your strongest day this week reached \(best) focused minutes."
+    }
+
+    private var earnedMedals: Set<String> {
+        let completedCount = sessions.filter(\.completed).count
+        let weeklySessionCount = sessions.filter { session in
+            session.completed && Calendar.current.dateComponents([.day], from: session.startedAt, to: .now).day ?? 999 < 7
+        }.count
+        var result = Set<String>()
+        if completedCount >= 1 { result.insert("first_focus") }
+        if minutesFocused >= 60 { result.insert("focused_hour") }
+        if currentStreak >= 3 { result.insert("three_day_streak") }
+        if minutesFocused >= 300 { result.insert("deep_work") }
+        if dragons.count >= 2 { result.insert("dragon_friend") }
+        if weeklySessionCount >= 5 { result.insert("weekly_rhythm") }
+        return result
+    }
+
+    private var timerProgress: Double {
+        guard sessionTotalSeconds > 0 else { return 0 }
+        return 1 - Double(remainingSeconds) / Double(sessionTotalSeconds)
+    }
+
+    private var timeString: String { String(format: "%02d:%02d", remainingSeconds / 60, remainingSeconds % 60) }
+
+    private func toggleTimer() {
+        if !timerRunning {
+            if remainingSeconds == 0 || remainingSeconds == sessionTotalSeconds {
+                sessionTotalSeconds = focusDurationMinutes * 60
+                remainingSeconds = sessionTotalSeconds
+                activeFocusElapsedSeconds = 0
+                activeFocusSessionStartTime = Date.now.timeIntervalSince1970
+            }
+            timerRunning = true
+            activeFocusRunning = true
+            activeFocusTotalSeconds = sessionTotalSeconds
+            activeFocusStartTime = Date.now.timeIntervalSince1970
+            scheduleFocusNotification(after: remainingSeconds)
+        } else {
+            updateRemainingFromClock()
+            timerRunning = false
+            activeFocusRunning = false
+            activeFocusElapsedSeconds = Double(sessionTotalSeconds - remainingSeconds)
+            activeFocusStartTime = 0
+            cancelFocusNotification()
+        }
+    }
+
+    private func tick() {
+        guard timerRunning, activeFocusRunning else { return }
+        updateRemainingFromClock()
+        if remainingSeconds == 0 { finishSession() }
+    }
+
+    private func updateRemainingFromClock() {
+        guard activeFocusRunning, activeFocusStartTime > 0 else { return }
+        let elapsed = activeFocusElapsedSeconds + max(0, Date.now.timeIntervalSince1970 - activeFocusStartTime)
+        remainingSeconds = max(0, activeFocusTotalSeconds - Int(elapsed))
+    }
+
+    private func restoreTimerState() {
+        guard activeFocusTotalSeconds > 0 else { return }
+        sessionTotalSeconds = activeFocusTotalSeconds
+        if activeFocusRunning {
+            timerRunning = true
+            updateRemainingFromClock()
+            if remainingSeconds == 0 {
+                finishSession()
+            } else {
+                scheduleFocusNotification(after: remainingSeconds)
+            }
+        } else {
+            timerRunning = false
+            remainingSeconds = max(0, sessionTotalSeconds - Int(activeFocusElapsedSeconds))
+        }
+    }
+
+    private func finishSession() {
+        updateRemainingFromClock()
+        let elapsedSeconds = max(1, sessionTotalSeconds - remainingSeconds)
+        let elapsed = max(1, elapsedSeconds / 60)
+        let earned = elapsed * 2
+        let startedAt = activeFocusSessionStartTime > 0 ? Date(timeIntervalSince1970: activeFocusSessionStartTime) : .now
+        modelContext.insert(FocusSession(startedAt: startedAt, durationMinutes: elapsed, xpEarned: earned))
+        dragon?.addXP(earned)
+        modelContext.insert(KingdomItem(kind: "lake", title: elapsed >= 20 ? "Crystal lagoon" : "Lake ripple"))
+        let totalAfterSession = minutesFocused + elapsed
+        for species in DragonSpecies.all where species.unlockMinutes <= totalAfterSession && !unlockedSpecies.contains(species.id) {
+            modelContext.insert(Dragon(name: species.name, speciesID: species.id, colorHex: species.colorHex))
+        }
+        try? modelContext.save()
+        timerRunning = false
+        activeFocusRunning = false
+        activeFocusStartTime = 0
+        activeFocusSessionStartTime = 0
+        activeFocusElapsedSeconds = 0
+        activeFocusTotalSeconds = 0
+        cancelFocusNotification()
+        sessionTotalSeconds = focusDurationMinutes * 60
+        remainingSeconds = sessionTotalSeconds
+        showingCompletion = true
+    }
+
+    private func scheduleFocusNotification(after seconds: Int) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["focus-complete"])
+        Task {
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Focus complete"
+            content.body = "Your dragon and Azuremere Lake are ready for their reward."
+            content.sound = .default
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, Double(seconds)), repeats: false)
+            let request = UNNotificationRequest(identifier: "focus-complete", content: content, trigger: trigger)
+            try? await center.add(request)
+        }
+    }
+
+    private func cancelFocusNotification() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["focus-complete"])
+    }
+
+    private func seedIfNeeded() {
+        if dragons.isEmpty {
+            let ruby = DragonSpecies.all[0]
+            modelContext.insert(Dragon(name: ruby.name, speciesID: ruby.id, colorHex: ruby.colorHex))
+        }
+        if activeFocusTotalSeconds == 0 {
+            sessionTotalSeconds = focusDurationMinutes * 60
+            remainingSeconds = sessionTotalSeconds
+        }
+        try? modelContext.save()
+    }
+}
+
+private struct TimerSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var durationMinutes: Int
+    @Binding var dailyGoalMinutes: Int
+    let isTimerRunning: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Focus duration") {
+                    ForEach([15, 25, 50], id: \.self) { value in
+                        Button {
+                            durationMinutes = value
+                        } label: {
+                            HStack {
+                                Text("\(value) minutes")
+                                Spacer()
+                                if durationMinutes == value {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isTimerRunning)
+                    }
+
+                    NavigationLink {
+                        CustomDurationView(durationMinutes: $durationMinutes, isTimerRunning: isTimerRunning)
+                    } label: {
+                        HStack {
+                            Text(isPresetDuration ? "Custom duration" : "\(durationMinutes) minutes")
+                            Spacer()
+                            if !isPresetDuration {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    .disabled(isTimerRunning)
+                }
+                Section("Daily goal") {
+                    Picker("Minutes per day", selection: $dailyGoalMinutes) {
+                        ForEach([30, 60, 90, 120], id: \.self) { value in
+                            Text("\(value) minutes").tag(value)
+                        }
+                    }
+                }
+                if isTimerRunning {
+                    Section {
+                        Label("Pause or finish the current session before changing its duration.", systemImage: "info.circle.fill")
+                            .foregroundStyle(DragonTheme.coralDark)
+                    }
+                }
+                Section("Good to know") {
+                    Text("You can pause a session. Ending early still saves your focused minutes and rewards your dragon.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Focus Settings")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var isPresetDuration: Bool {
+        [15, 25, 50].contains(durationMinutes)
+    }
+}
+
+private struct CustomDurationView: View {
+    @Binding var durationMinutes: Int
+    let isTimerRunning: Bool
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Custom focus duration", selection: $durationMinutes) {
+                    ForEach(1...180, id: \.self) { value in
+                        Text("\(value) minutes").tag(value)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+                .frame(height: 190)
+                .disabled(isTimerRunning)
+            } header: {
+                Text("Custom focus length")
+            } footer: {
+                Text("Choose any duration from 1 to 180 minutes.")
+            }
+        }
+        .navigationTitle("Custom Duration")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct DragonSpeciesRow: View {
+    let species: DragonSpecies
+    let unlocked: Bool
+    let minutesFocused: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(unlocked ? species.emoji : "❔").font(.title2).frame(width: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(unlocked ? species.name : "Locked dragon").font(.subheadline.bold())
+                Text(unlocked ? species.description : "Unlock at \(species.unlockMinutes) focused minutes")
+                    .font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.56))
+            }
+            Spacer()
+            if unlocked {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(DragonTheme.mint)
+            } else {
+                Text("\(max(0, species.unlockMinutes - minutesFocused))m")
+                    .font(.caption.bold()).foregroundStyle(DragonTheme.coralDark)
+            }
+        }
+    }
+}
+
+private struct StatTile: View {
+    let value: String
+    let label: String
+    var body: some View {
+        VStack(spacing: 4) { Text(value).font(.title3.bold()); Text(label).font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.55)) }
+            .frame(maxWidth: .infinity).padding(.vertical, 13).background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+private struct DashboardMetric: View {
+    let value: String
+    let label: String
+    let icon: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: icon).foregroundStyle(DragonTheme.coral)
+            Text(value).font(.headline.monospacedDigit())
+            Text(label).font(.caption2).foregroundStyle(DragonTheme.ink.opacity(0.55))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+private struct MedalRow: View {
+    let medal: FocusMedal
+    let earned: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(medal.icon).font(.title2).grayscale(earned ? 0 : 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(medal.title).font(.subheadline.bold()).foregroundStyle(earned ? DragonTheme.ink : DragonTheme.ink.opacity(0.45))
+                Text(medal.detail).font(.caption).foregroundStyle(DragonTheme.ink.opacity(0.52))
+            }
+            Spacer()
+            Image(systemName: earned ? "checkmark.seal.fill" : "lock.fill")
+                .foregroundStyle(earned ? DragonTheme.gold : DragonTheme.ink.opacity(0.25))
+        }
+    }
+}
+
+private struct LakeDragonCard: View {
+    let dragon: Dragon
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Text(dragon.species.emoji).font(.system(size: 34))
+            Text(dragon.name).font(.subheadline.bold()).foregroundStyle(DragonTheme.ink)
+            Text(dragon.stage.title).font(.caption2).foregroundStyle(DragonTheme.coralDark)
+        }
+        .frame(maxWidth: .infinity, minHeight: 100)
+        .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+private struct KingdomTile: View {
+    let item: KingdomItem
+    var body: some View {
+        VStack(spacing: 8) { Text(item.kind == "lake" ? "🌊" : item.kind == "tree" ? "🌳" : "🌱").font(.system(size: 46)); Text(item.title).font(.headline).foregroundStyle(DragonTheme.ink) }
+            .frame(maxWidth: .infinity).padding(.vertical, 22).background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+private struct LakeProject: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let icon: String
+    let requiredLevel: Int
+
+    static let all: [LakeProject] = [
+        LakeProject(id: "shore", title: "Quiet shore", detail: "A calm place to begin", icon: "🌊", requiredLevel: 1),
+        LakeProject(id: "reed_garden", title: "Reed garden", detail: "A refuge for gentle dragons", icon: "🌾", requiredLevel: 2),
+        LakeProject(id: "moon_bridge", title: "Moon bridge", detail: "Unlocks at lake level 4", icon: "🌙", requiredLevel: 4),
+        LakeProject(id: "crystal_isle", title: "Crystal isle", detail: "A sanctuary for rare dragons", icon: "💎", requiredLevel: 7)
+    ]
+}
+
+private struct LakeProjectRow: View {
+    let project: LakeProject
+    let unlocked: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(unlocked ? project.icon : "🔒").font(.title2).frame(width: 34)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(project.title).font(.subheadline.bold())
+                Text(unlocked ? project.detail : "Focus to reach lake level \(project.requiredLevel)")
+                    .font(.caption).foregroundStyle(.white.opacity(0.72))
+            }
+            Spacer()
+            Image(systemName: unlocked ? "checkmark.circle.fill" : "circle.dotted")
+                .foregroundStyle(unlocked ? DragonTheme.gold : .white.opacity(0.55))
+        }
+        .padding(12)
+        .background(.white.opacity(unlocked ? 0.18 : 0.10), in: RoundedRectangle(cornerRadius: 16))
+        .foregroundStyle(.white)
+    }
+}
+
+private struct PrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.headline).foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 15).background(DragonTheme.coral, in: Capsule()).scaleEffect(configuration.isPressed ? 0.97 : 1)
+    }
+}

@@ -1,0 +1,15 @@
+.DS_Store
+
+# Xcode user-specific data
+xcuserdata/
+*.xcuserstate
+
+# Build output
+DerivedData/
+.build/
+build/
+
+# Swift package and local tooling caches
+Packages/
+.swiftpm/
+
