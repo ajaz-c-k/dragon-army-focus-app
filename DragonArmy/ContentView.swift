@@ -1181,9 +1181,19 @@ private struct DragonAvatarView: View {
     }
 
     var body: some View {
-        // The roster uses a lightweight animated avatar. RealityKit remains in
-        // the large inspection preview, where it has room for a stable camera.
-        flatPreview
+        ZStack {
+            // The vector avatar guarantees a visible silhouette while RealityKit
+            // finishes loading the small animated 3D scene.
+            flatPreview.opacity(0.22)
+            DragonMiniSceneView(
+                speciesID: species.id,
+                stage: stage,
+                colorHex: species.colorHex,
+                size: size,
+                animated: animated
+            )
+        }
+        .frame(width: size, height: size)
     }
 
     private var flatPreview: some View {
