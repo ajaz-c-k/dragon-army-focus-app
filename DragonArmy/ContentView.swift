@@ -1181,6 +1181,16 @@ private struct DragonAvatarView: View {
     }
 
     var body: some View {
+        DragonMiniSceneView(
+            speciesID: species.id,
+            stage: stage,
+            colorHex: species.colorHex,
+            size: size,
+            animated: animated
+        )
+    }
+
+    private var flatPreview: some View {
         ZStack {
             Circle()
                 .fill(glowColor.opacity(0.16))
