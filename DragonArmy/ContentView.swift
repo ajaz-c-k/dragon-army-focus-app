@@ -1181,13 +1181,18 @@ private struct DragonAvatarView: View {
     }
 
     var body: some View {
-        DragonMiniSceneView(
-            speciesID: species.id,
-            stage: stage,
-            colorHex: species.colorHex,
-            size: size,
-            animated: animated
-        )
+        ZStack {
+            // Keep a quiet silhouette underneath while RealityKit prepares the 3D scene.
+            flatPreview.opacity(0.10)
+            DragonMiniSceneView(
+                speciesID: species.id,
+                stage: stage,
+                colorHex: species.colorHex,
+                size: size,
+                animated: animated
+            )
+        }
+        .frame(width: size, height: size)
     }
 
     private var flatPreview: some View {
