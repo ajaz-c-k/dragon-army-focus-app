@@ -13,9 +13,11 @@
 		000000000000000000000063 /* DragonSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* DragonSceneView.swift */; };
 		000000000000000000000064 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000034 /* ContentView.swift */; };
 		000000000000000000000066 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000036 /* OnboardingView.swift */; };
+		000000000000000000000067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000037 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000000037 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		000000000000000000000030 /* DragonArmyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragonArmyApp.swift; sourceTree = "<group>"; };
 		000000000000000000000031 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		000000000000000000000032 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -29,6 +31,7 @@
 		000000000000000000000002 /* DragonArmy */ = {
 			isa = PBXGroup;
 			children = (
+				000000000000000000000037 /* Assets.xcassets */,
 				000000000000000000000030 /* DragonArmyApp.swift */,
 				000000000000000000000031 /* Models.swift */,
 				000000000000000000000032 /* Theme.swift */,
@@ -56,6 +59,7 @@
 			buildConfigurationList = 000000000000000000000011 /* Build configuration list for PBXNativeTarget "DragonArmy" */;
 			buildPhases = (
 				000000000000000000000050 /* Sources */,
+				000000000000000000000051 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -106,6 +110,17 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000000000051 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000067 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 
 /* Begin XCBuildConfiguration section */
