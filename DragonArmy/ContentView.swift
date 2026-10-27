@@ -16,6 +16,7 @@ struct ContentView: View {
     @AppStorage("activeFocusSessionStartTime") private var activeFocusSessionStartTime = 0.0
     @AppStorage("activeFocusElapsedSeconds") private var activeFocusElapsedSeconds = 0.0
     @AppStorage("activeFocusTotalSeconds") private var activeFocusTotalSeconds = 0
+    @AppStorage("activeFocusEggStartingSeconds") private var activeFocusEggStartingSeconds = 0
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("dragonExplorerName") private var explorerName = "Dragon Keeper"
     @State private var selectedTab = 0
@@ -521,7 +522,7 @@ struct ContentView: View {
         guard let egg = activeEgg else { return 0 }
         let focusedSeconds: Double
         if timerRunning && activeFocusRunning {
-            focusedSeconds = activeFocusElapsedSeconds + max(0, Date.now.timeIntervalSince1970 - activeFocusStartTime)
+            focusedSeconds = Double(activeFocusEggStartingSeconds) + activeFocusElapsedSeconds + max(0, Date.now.timeIntervalSince1970 - activeFocusStartTime)
         } else {
             focusedSeconds = Double(egg.focusedSeconds)
         }
@@ -538,10 +539,11 @@ struct ContentView: View {
                 activeFocusElapsedSeconds = 0
                 activeFocusSessionStartTime = Date.now.timeIntervalSince1970
             }
-            if focusDurationMinutes == 60 && activeEgg == nil, let next = nextEggSpecies {
+            if activeEgg == nil, let next = nextEggSpecies {
                 modelContext.insert(DragonEgg(speciesID: next.id))
                 try? modelContext.save()
             }
+            activeFocusEggStartingSeconds = activeEgg?.focusedSeconds ?? 0
             timerRunning = true
             activeFocusRunning = true
             activeFocusTotalSeconds = sessionTotalSeconds
@@ -597,16 +599,19 @@ struct ContentView: View {
         modelContext.insert(FocusSession(startedAt: startedAt, durationMinutes: elapsed, xpEarned: earned))
         dragon?.addXP(earned)
         modelContext.insert(KingdomItem(kind: "lake", title: elapsed >= 20 ? "Crystal lagoon" : "Lake ripple"))
+        var speciesIDs = unlockedSpecies
         if let egg = activeEgg, eggProgress >= 1 {
             egg.focusedSeconds = egg.durationSeconds
             egg.hatched = true
-            if !dragons.contains(where: { $0.speciesID == egg.speciesID }) {
+            if !speciesIDs.contains(egg.speciesID) {
                 modelContext.insert(Dragon(name: egg.species.name, speciesID: egg.species.id, colorHex: egg.species.colorHex))
+                speciesIDs.insert(egg.speciesID)
             }
         }
         let totalAfterSession = minutesFocused + elapsed
-        for species in DragonSpecies.all where species.unlockMinutes <= totalAfterSession && !unlockedSpecies.contains(species.id) {
+        for species in DragonSpecies.all where species.unlockMinutes <= totalAfterSession && !speciesIDs.contains(species.id) {
             modelContext.insert(Dragon(name: species.name, speciesID: species.id, colorHex: species.colorHex))
+            speciesIDs.insert(species.id)
         }
         try? modelContext.save()
         timerRunning = false
@@ -622,9 +627,9 @@ struct ContentView: View {
     }
 
     private func syncEggProgress() {
-        guard let egg = activeEgg, sessionTotalSeconds == egg.durationSeconds else { return }
+        guard let egg = activeEgg else { return }
         let elapsedSeconds = max(0, sessionTotalSeconds - remainingSeconds)
-        egg.focusedSeconds = min(egg.durationSeconds, elapsedSeconds)
+        egg.focusedSeconds = min(egg.durationSeconds, activeFocusEggStartingSeconds + elapsedSeconds)
         try? modelContext.save()
     }
 
@@ -768,14 +773,14 @@ private struct TimerEggPanel: View {
     @State private var pulse = false
 
     private var message: String {
-        if hasHatched { return "Hatched! Start another 60-minute flight for the next dragon." }
+        if hasHatched { return "Hatched! Start another focus session for the next dragon." }
         if isRunning { return "Your focus is cracking the shell. Keep going." }
-        return "A 60-minute focus flight hatches a new dragon."
+        return "Every 60 focused minutes hatches a new dragon."
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse)
+            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse, isHatching: isRunning)
                 .frame(width: 58, height: 66)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -826,13 +831,13 @@ private struct EggHatchingCard: View {
             if progress < 0.90 { return "Your dragon is stirring inside the shell." }
             return "One last push. The hatchling is almost here!"
         }
-        return "Choose exactly 60 minutes in Focus to start an egg hatching journey."
+        return "Start a focus session and build toward 60 focused minutes to hatch this dragon."
     }
 
     var body: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse)
+                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse, isHatching: isHatching)
                     .frame(width: 76, height: 88)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -856,7 +861,7 @@ private struct EggHatchingCard: View {
             ProgressView(value: progress)
                 .tint(progress >= 1 ? DragonTheme.mint : DragonTheme.coral)
             HStack {
-                Text(progress >= 1 ? "Ready to explore" : isHatching ? "\(Int(progress * 100))% hatched" : "60-minute egg")
+                Text(progress >= 1 ? "Ready to explore" : isHatching ? "\(Int(progress * 100))% hatched" : "60 focused minutes")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(DragonTheme.ink.opacity(0.58))
                 Spacer(minLength: 8)
@@ -878,6 +883,7 @@ private struct EggVisual: View {
     let progress: Double
     let dragonEmoji: String
     let pulse: Bool
+    let isHatching: Bool
 
     var body: some View {
         ZStack {
@@ -888,14 +894,14 @@ private struct EggVisual: View {
                 .font(.system(size: progress >= 1 ? 52 : 60))
                 .scaleEffect(pulse && progress < 1 ? 1.05 : 1)
                 .rotationEffect(.degrees(progress > 0.62 && progress < 1 ? 4 : 0))
-            if progress >= 0.22 && progress < 1 {
+            if isHatching && progress < 1 {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 27, weight: .bold))
                     .foregroundStyle(.white.opacity(0.92))
                     .rotationEffect(.degrees(18))
                     .offset(x: 5, y: 2)
             }
-            if progress >= 0.66 && progress < 1 {
+            if isHatching && progress >= 0.33 && progress < 1 {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 19, weight: .bold))
                     .foregroundStyle(.white.opacity(0.82))
