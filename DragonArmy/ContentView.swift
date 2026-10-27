@@ -779,8 +779,13 @@ private struct TimerEggPanel: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", isHatching: isRunning)
-                .frame(width: 58, height: 66)
+            EggVisual(
+                progress: progress,
+                dragonEmoji: species?.emoji ?? "🐉",
+                colorHex: species?.colorHex ?? "E5A83B",
+                isHatching: isRunning
+            )
+                .frame(width: 70, height: 76)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(hasHatched ? "Dragon unlocked" : "Egg mission")
@@ -833,8 +838,13 @@ private struct EggHatchingCard: View {
     var body: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", isHatching: isHatching)
-                    .frame(width: 76, height: 88)
+                EggVisual(
+                    progress: progress,
+                    dragonEmoji: species?.emoji ?? "🐉",
+                    colorHex: species?.colorHex ?? "E5A83B",
+                    isHatching: isHatching
+                )
+                    .frame(width: 90, height: 96)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
@@ -876,13 +886,14 @@ private struct EggHatchingCard: View {
 private struct EggVisual: View {
     let progress: Double
     let dragonEmoji: String
+    let colorHex: String
     let isHatching: Bool
     @State private var wobble = false
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(DragonTheme.gold.opacity(progress > 0 ? 0.22 : 0.12))
+                .fill(Color(hex: colorHex).opacity(progress > 0 ? 0.22 : 0.14))
                 .blur(radius: 8)
             if progress >= 1 {
                 Text(dragonEmoji)
@@ -891,12 +902,28 @@ private struct EggVisual: View {
             } else {
                 ZStack {
                     Ellipse()
-                        .fill(LinearGradient(colors: [Color.white, Color(red: 0.82, green: 0.80, blue: 0.74)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .fill(LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.92),
+                                Color(hex: colorHex).opacity(0.96),
+                                Color(hex: colorHex).opacity(0.70)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
                         .overlay {
                             Ellipse()
-                                .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
+                                .stroke(Color(hex: colorHex).opacity(0.92), lineWidth: 2)
                         }
                         .shadow(color: .black.opacity(0.15), radius: 5, y: 4)
+                    Circle()
+                        .fill(.white.opacity(0.50))
+                        .frame(width: 8, height: 8)
+                        .offset(x: -10, y: -17)
+                    Circle()
+                        .fill(.white.opacity(0.24))
+                        .frame(width: 5, height: 5)
+                        .offset(x: 12, y: 13)
                     if isHatching {
                         CrackMark(variant: 0)
                     }
@@ -907,7 +934,7 @@ private struct EggVisual: View {
                         CrackMark(variant: 2)
                     }
                 }
-                .frame(width: 44, height: 60)
+                .frame(width: 52, height: 70)
                 .rotationEffect(.degrees(isHatching ? (wobble ? 3 : -3) : 0))
                 .offset(x: isHatching ? (wobble ? 1 : -1) : 0)
                 .scaleEffect(isHatching && wobble ? 1.04 : 1)
