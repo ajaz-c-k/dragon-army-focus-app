@@ -770,7 +770,6 @@ private struct TimerEggPanel: View {
     let species: DragonSpecies?
     let isRunning: Bool
     let hasHatched: Bool
-    @State private var pulse = false
 
     private var message: String {
         if hasHatched { return "Hatched! Start another focus session for the next dragon." }
@@ -780,7 +779,7 @@ private struct TimerEggPanel: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse, isHatching: isRunning)
+            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", isHatching: isRunning)
                 .frame(width: 58, height: 66)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -803,8 +802,6 @@ private struct TimerEggPanel: View {
         }
         .padding(12)
         .background(DragonTheme.gold.opacity(0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .onAppear { pulse = isRunning }
-        .onChange(of: isRunning) { _, running in pulse = running }
     }
 }
 
@@ -813,7 +810,6 @@ private struct EggHatchingCard: View {
     let species: DragonSpecies?
     let isHatching: Bool
     let focusDurationMinutes: Int
-    @State private var pulse = false
 
     private var title: String {
         if progress >= 1 { return "Dragon hatched!" }
@@ -837,7 +833,7 @@ private struct EggHatchingCard: View {
     var body: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse, isHatching: isHatching)
+                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", isHatching: isHatching)
                     .frame(width: 76, height: 88)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -874,48 +870,85 @@ private struct EggHatchingCard: View {
         }
         .padding(16)
         .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .onAppear { pulse = true }
-        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulse)
     }
 }
 
 private struct EggVisual: View {
     let progress: Double
     let dragonEmoji: String
-    let pulse: Bool
     let isHatching: Bool
+    @State private var wobble = false
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(DragonTheme.gold.opacity(progress > 0 ? 0.22 : 0.12))
                 .blur(radius: 8)
-            Text(progress >= 1 ? dragonEmoji : "🥚")
-                .font(.system(size: progress >= 1 ? 52 : 60))
-                .scaleEffect(pulse && progress < 1 ? 1.05 : 1)
-                .rotationEffect(.degrees(progress > 0.62 && progress < 1 ? 4 : 0))
-            if isHatching && progress < 1 {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 27, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .rotationEffect(.degrees(18))
-                    .offset(x: 5, y: 2)
-            }
-            if isHatching && progress >= 0.33 && progress < 1 {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .rotationEffect(.degrees(-24))
-                    .offset(x: -12, y: -10)
+            if progress >= 1 {
+                Text(dragonEmoji)
+                    .font(.system(size: 52))
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                ZStack {
+                    Ellipse()
+                        .fill(LinearGradient(colors: [Color.white, Color(red: 0.82, green: 0.80, blue: 0.74)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay {
+                            Ellipse()
+                                .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
+                        }
+                        .shadow(color: .black.opacity(0.15), radius: 5, y: 4)
+                    if isHatching {
+                        CrackMark(variant: 0)
+                    }
+                    if isHatching && progress >= 0.33 {
+                        CrackMark(variant: 1)
+                    }
+                    if isHatching && progress >= 0.66 {
+                        CrackMark(variant: 2)
+                    }
+                }
+                .frame(width: 44, height: 60)
+                .rotationEffect(.degrees(isHatching ? (wobble ? 3 : -3) : 0))
+                .offset(x: isHatching ? (wobble ? 1 : -1) : 0)
+                .scaleEffect(isHatching && wobble ? 1.04 : 1)
+                .animation(.easeInOut(duration: 0.42).repeatForever(autoreverses: true), value: wobble)
             }
         }
+        .onAppear { wobble = isHatching }
+        .onChange(of: isHatching) { _, value in wobble = value }
+    }
+}
+
+private struct CrackMark: View {
+    let variant: Int
+
+    var body: some View {
+        Path { path in
+            switch variant {
+            case 0:
+                path.move(to: CGPoint(x: 23, y: 16))
+                path.addLine(to: CGPoint(x: 18, y: 27))
+                path.addLine(to: CGPoint(x: 23, y: 35))
+                path.addLine(to: CGPoint(x: 19, y: 48))
+            case 1:
+                path.move(to: CGPoint(x: 22, y: 35))
+                path.addLine(to: CGPoint(x: 30, y: 41))
+                path.addLine(to: CGPoint(x: 27, y: 55))
+            default:
+                path.move(to: CGPoint(x: 18, y: 27))
+                path.addLine(to: CGPoint(x: 10, y: 30))
+                path.addLine(to: CGPoint(x: 8, y: 40))
+            }
+        }
+        .stroke(.white.opacity(0.94), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+        .frame(width: 44, height: 60)
+        .shadow(color: .black.opacity(0.12), radius: 1)
     }
 }
 
 private struct LakeIslandView: View {
     let dragons: [Dragon]
     let lakeLevel: Int
-    @State private var animate = false
 
     private let dragonOffsets: [(CGFloat, CGFloat)] = [
         (-88, 18), (-42, -12), (0, 12), (44, -14), (88, 18), (0, -38)
@@ -946,16 +979,8 @@ private struct LakeIslandView: View {
             ForEach(Array(dragons.prefix(6).indices), id: \.self) { index in
                 let dragon = dragons[index]
                 let offset = dragonOffsets[index % dragonOffsets.count]
-                VStack(spacing: 0) {
-                    Text(dragon.species.emoji)
-                        .font(.system(size: index == 2 ? 39 : 32))
-                    Circle()
-                        .fill(.black.opacity(0.16))
-                        .frame(width: 25, height: 6)
-                        .blur(radius: 2)
-                }
-                .offset(x: offset.0, y: offset.1 + (animate ? -3 : 3))
-                .animation(.easeInOut(duration: 1.8 + Double(index) * 0.12).repeatForever(autoreverses: true), value: animate)
+                LakeDragonSprite(emoji: dragon.species.emoji, size: index == 2 ? 39 : 32, delay: Double(index) * 0.08)
+                    .offset(x: offset.0, y: offset.1)
             }
             VStack {
                 HStack {
@@ -979,7 +1004,27 @@ private struct LakeIslandView: View {
         }
         .frame(height: 250)
         .clipped()
-        .onAppear { animate = true }
+    }
+}
+
+private struct LakeDragonSprite: View {
+    let emoji: String
+    let size: CGFloat
+    let delay: Double
+    @State private var floating = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(emoji)
+                .font(.system(size: size))
+            Circle()
+                .fill(.black.opacity(0.16))
+                .frame(width: 25, height: 6)
+                .blur(radius: 2)
+        }
+        .offset(y: floating ? -4 : 4)
+        .animation(.easeInOut(duration: 1.8).delay(delay).repeatForever(autoreverses: true), value: floating)
+        .onAppear { floating = true }
     }
 }
 
