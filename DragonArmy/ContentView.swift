@@ -223,7 +223,7 @@ struct ContentView: View {
                 .padding(20)
             }
             .background(DragonTheme.cream.ignoresSafeArea())
-            .navigationTitle("Dragon Army")
+            .navigationTitle("Toothless")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSettings = true } label: {
@@ -330,7 +330,7 @@ struct ContentView: View {
                 VStack(spacing: 18) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Dragon Army").font(.title.bold())
+                            Text("Toothless").font(.title.bold())
                             Text("\(dragons.count) unlocked · \(DragonSpecies.all.count - dragons.count) still to discover")
                                 .font(.subheadline).foregroundStyle(DragonTheme.ink.opacity(0.62))
                         }

@@ -55,7 +55,7 @@ struct DragonOnboardingView: View {
                 Color.clear.frame(width: 42, height: 42)
             }
 
-            Text("DRAGON ARMY")
+            Text("TOOTHLESS")
                 .font(.caption.weight(.heavy))
                 .tracking(2.2)
                 .foregroundStyle(DragonTheme.coralDark)

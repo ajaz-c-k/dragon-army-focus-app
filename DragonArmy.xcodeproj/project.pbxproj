@@ -155,6 +155,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				DEVELOPMENT_TEAM = 3AZWWFJJ6V;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Toothless;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -175,6 +176,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				DEVELOPMENT_TEAM = 3AZWWFJJ6V;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Toothless;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
