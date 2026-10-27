@@ -2,7 +2,7 @@ import SwiftUI
 import RealityKit
 import UIKit
 
-private func dragonMaterial(hex: String, roughness: Float) -> SimpleMaterial {
+private func dragonMaterial(hex: String, roughness: Float) -> any RealityKit.Material {
     let value = UInt64(hex, radix: 16) ?? 0xE85D4A
     let color = UIColor(
         red: CGFloat((value >> 16) & 0xFF) / 255,
@@ -10,7 +10,14 @@ private func dragonMaterial(hex: String, roughness: Float) -> SimpleMaterial {
         blue: CGFloat(value & 0xFF) / 255,
         alpha: 1
     )
+    #if targetEnvironment(simulator)
+    // iOS 27's simulator PBR renderer can crash while binding its tone-map
+    // lookup textures. UnlitMaterial keeps the procedural 3D geometry visible
+    // in the simulator; physical shading remains enabled on a real iPhone.
+    return UnlitMaterial(color: color, applyPostProcessToneMap: false)
+    #else
     return SimpleMaterial(color: color, roughness: .float(roughness), isMetallic: false)
+    #endif
 }
 
 struct DragonSceneView: View {
@@ -43,10 +50,12 @@ struct DragonSceneView: View {
     var body: some View {
         RealityView { content in
             content.add(makeDragon(stage: stage))
+            #if !targetEnvironment(simulator)
             let light = DirectionalLight()
             light.light.intensity = 900
             light.look(at: [0, 0, 0], from: [2, 3, 4], relativeTo: nil)
             content.add(light)
+            #endif
         } update: { content in
             content.entities.removeAll()
             content.add(makeDragon(stage: stage))
@@ -139,10 +148,12 @@ struct DragonMiniSceneView: View {
     var body: some View {
         RealityView { content in
             content.add(makeDragon())
+            #if !targetEnvironment(simulator)
             let light = DirectionalLight()
             light.light.intensity = 850
             light.look(at: [0, 0, 0], from: [2, 3, 4], relativeTo: nil)
             content.add(light)
+            #endif
         } update: { content in
             content.entities.removeAll()
             content.add(makeDragon())
