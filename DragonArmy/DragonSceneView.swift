@@ -1,5 +1,6 @@
 import SwiftUI
 import RealityKit
+import SceneKit
 import UIKit
 
 private func dragonMaterial(hex: String, roughness: Float) -> any RealityKit.Material {
@@ -49,7 +50,7 @@ struct DragonSceneView: View {
 
     var body: some View {
         #if targetEnvironment(simulator)
-        DragonSimulatorPreview(
+        DragonSceneKitPreview(
             speciesID: speciesID,
             stage: stage,
             colorHex: colorHex,
@@ -158,7 +159,7 @@ struct DragonMiniSceneView: View {
 
     var body: some View {
         #if targetEnvironment(simulator)
-        DragonSimulatorPreview(
+        DragonSceneKitPreview(
             speciesID: speciesID,
             stage: stage,
             colorHex: colorHex,
@@ -234,9 +235,164 @@ struct DragonMiniSceneView: View {
 
 }
 
-/// A stable simulator-only preview. iOS 27's simulator Metal validation can
-/// crash RealityKit's render pipeline, so the simulator gets a layered,
-/// shaded SwiftUI dragon while a real iPhone uses the RealityKit scene above.
+/// A real 3D simulator preview. iOS 27's simulator Metal validation can crash
+/// RealityKit's render pipeline, so the simulator uses SceneKit geometry while
+/// a real iPhone uses the RealityKit scene above.
+private struct DragonSceneKitPreview: UIViewRepresentable {
+    let speciesID: String
+    let stage: DragonStage
+    let colorHex: String
+    let size: CGFloat
+    let animated: Bool
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.scene = makeScene()
+        view.backgroundColor = .clear
+        view.isPlaying = animated
+        view.rendersContinuously = animated
+        view.preferredFramesPerSecond = 60
+        view.antialiasingMode = .multisampling4X
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: SCNView, context: Context) {
+        view.isPlaying = animated
+    }
+
+    private func makeScene() -> SCNScene {
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = 28
+        camera.position = SCNVector3(0, 0.12, 4.5)
+        camera.constraints = [SCNLookAtConstraint(target: scene.rootNode)]
+        scene.rootNode.addChildNode(camera)
+
+        let keyLight = SCNNode()
+        keyLight.light = SCNLight()
+        keyLight.light?.type = .omni
+        keyLight.light?.color = UIColor.white
+        keyLight.light?.intensity = 850
+        keyLight.position = SCNVector3(2.2, 3.0, 4.0)
+        scene.rootNode.addChildNode(keyLight)
+
+        let fillLight = SCNNode()
+        fillLight.light = SCNLight()
+        fillLight.light?.type = .ambient
+        fillLight.light?.color = UIColor(red: 0.55, green: 0.68, blue: 1.0, alpha: 1)
+        fillLight.light?.intensity = 260
+        scene.rootNode.addChildNode(fillLight)
+
+        let dragon = makeDragon()
+        let scale: Float = stage == .hatchling ? 0.78 : stage == .guardian ? 1.08 : 0.94
+        dragon.scale = SCNVector3(scale, scale, scale)
+        dragon.position = SCNVector3(0, -0.14, 0)
+        scene.rootNode.addChildNode(dragon)
+
+        if animated {
+            let rise = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.7)
+            rise.timingMode = .easeInEaseOut
+            let fall = rise.reversed()
+            let sway = SCNAction.rotateBy(x: 0, y: 0.10, z: 0, duration: 2.2)
+            sway.timingMode = .easeInEaseOut
+            let swayBack = sway.reversed()
+            dragon.runAction(.repeatForever(.group([
+                .repeatForever(.sequence([rise, fall])),
+                .repeatForever(.sequence([sway, swayBack]))
+            ])))
+        }
+        return scene
+    }
+
+    private func makeDragon() -> SCNNode {
+        let root = SCNNode()
+        let bodyMaterial = material(hex: colorHex, roughness: 0.44)
+        let wingMaterial = material(hex: wingHex, roughness: 0.52)
+        let eyeMaterial = material(hex: "F0AD3D", roughness: 0.24)
+
+        let body = SCNNode(geometry: sphere(radius: 0.72, material: bodyMaterial))
+        body.scale = SCNVector3(1.0, 0.84, 1.14)
+        root.addChildNode(body)
+
+        let head = SCNNode(geometry: sphere(radius: 0.48, material: bodyMaterial))
+        head.position = SCNVector3(0, 0.62, -0.06)
+        root.addChildNode(head)
+
+        let snout = SCNNode(geometry: sphere(radius: 0.24, material: bodyMaterial))
+        snout.scale = SCNVector3(1.0, 0.72, 0.82)
+        snout.position = SCNVector3(0, 0.51, 0.38)
+        root.addChildNode(snout)
+
+        for x in [-0.18, 0.18] {
+            let eye = SCNNode(geometry: sphere(radius: 0.075, material: eyeMaterial))
+            eye.position = SCNVector3(Float(x), 0.74, 0.42)
+            root.addChildNode(eye)
+        }
+
+        for x in [-0.23, 0.23] {
+            let horn = SCNNode(geometry: SCNCone(topRadius: 0.025, bottomRadius: 0.11, height: 0.34))
+            horn.geometry?.firstMaterial = wingMaterial
+            horn.position = SCNVector3(Float(x), 1.02, -0.03)
+            horn.eulerAngles.z = x < 0 ? -0.28 : 0.28
+            root.addChildNode(horn)
+        }
+
+        for x in [-0.82, 0.82] {
+            let wing = SCNNode(geometry: SCNCone(topRadius: 0.04, bottomRadius: 0.54, height: 0.95))
+            wing.geometry?.firstMaterial = wingMaterial
+            wing.position = SCNVector3(Float(x), 0.38, 0.10)
+            wing.scale = SCNVector3(0.82, 0.38, 0.95)
+            wing.eulerAngles.z = x < 0 ? -0.58 : 0.58
+            root.addChildNode(wing)
+        }
+
+        let tail = SCNNode(geometry: SCNCone(topRadius: 0.03, bottomRadius: 0.25, height: 1.18))
+        tail.geometry?.firstMaterial = bodyMaterial
+        tail.position = SCNVector3(0, -0.06, -0.96)
+        tail.eulerAngles.x = .pi / 2
+        root.addChildNode(tail)
+        return root
+    }
+
+    private var wingHex: String {
+        switch speciesID {
+        case "azure": return "0D4C94"
+        case "moss": return "1F5933"
+        case "sunstone": return "D1570D"
+        case "moon": return "381F6B"
+        case "crystal": return "0D6B6E"
+        default: return "921F24"
+        }
+    }
+
+    private func sphere(radius: CGFloat, material: SCNMaterial) -> SCNSphere {
+        let geometry = SCNSphere(radius: radius)
+        geometry.segmentCount = 32
+        geometry.firstMaterial = material
+        return geometry
+    }
+
+    private func material(hex: String, roughness: CGFloat) -> SCNMaterial {
+        let value = UInt64(hex, radix: 16) ?? 0xE85D4A
+        let color = UIColor(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.specular.contents = UIColor.white.withAlphaComponent(0.35)
+        material.roughness.contents = roughness
+        return material
+    }
+}
+
+/// Kept as a graceful shape fallback if SceneKit cannot create a view.
 private struct DragonSimulatorPreview: View {
     let speciesID: String
     let stage: DragonStage
@@ -305,8 +461,12 @@ private struct DragonSimulatorPreview: View {
             .offset(y: -size * 0.22)
 
             HStack(spacing: size * 0.13) {
-                DragonSimulatorHorn().fill(wingColor)
-                DragonSimulatorHorn().fill(wingColor)
+                DragonSimulatorHorn()
+                    .fill(wingColor)
+                    .frame(width: size * 0.13, height: size * 0.24)
+                DragonSimulatorHorn()
+                    .fill(wingColor)
+                    .frame(width: size * 0.13, height: size * 0.24)
             }
             .offset(y: -size * 0.38)
 
