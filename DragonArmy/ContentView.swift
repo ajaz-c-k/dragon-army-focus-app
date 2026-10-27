@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \Dragon.createdAt) private var dragons: [Dragon]
+    @Query(sort: \DragonEgg.startedAt, order: .reverse) private var eggs: [DragonEgg]
     @Query(sort: \FocusSession.startedAt, order: .reverse) private var sessions: [FocusSession]
     @Query(sort: \KingdomItem.plantedAt) private var kingdomItems: [KingdomItem]
     @AppStorage("focusDurationMinutes") private var focusDurationMinutes = 25
@@ -28,6 +29,10 @@ struct ContentView: View {
     private var dragon: Dragon? { dragons.first }
     private var minutesFocused: Int { sessions.filter(\.completed).reduce(0) { $0 + $1.durationMinutes } }
     private var unlockedSpecies: Set<String> { Set(dragons.map(\.speciesID)) }
+    private var activeEgg: DragonEgg? { eggs.first(where: { !$0.hatched }) }
+    private var nextEggSpecies: DragonSpecies? {
+        DragonSpecies.all.first(where: { !unlockedSpecies.contains($0.id) })
+    }
     private var explorerDisplayName: String {
         let trimmed = explorerName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Dragon Keeper" : trimmed
@@ -391,6 +396,12 @@ struct ContentView: View {
                             Text("Level \(lakeLevel)").font(.headline).foregroundStyle(.white).padding(10).background(.white.opacity(0.18), in: Capsule())
                         }
                         lakeHero
+                        EggHatchingCard(
+                            progress: eggProgress,
+                            species: activeEgg?.species ?? nextEggSpecies,
+                            isHatching: activeEgg != nil,
+                            focusDurationMinutes: focusDurationMinutes
+                        )
                         Text("Lake projects").font(.headline).foregroundStyle(.white)
                         VStack(spacing: 10) {
                             ForEach(LakeProject.all) { project in
@@ -423,18 +434,7 @@ struct ContentView: View {
     }
 
     private var lakeHero: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(LinearGradient(colors: [Color.white.opacity(0.30), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            VStack(spacing: 8) {
-                Text("🌊").font(.system(size: 64))
-                Text("\(kingdomItems.filter { $0.kind == "lake" }.count) lake expansions")
-                    .font(.headline).foregroundStyle(.white)
-                Text("Every focused session makes the lake wider and brighter.")
-                    .font(.caption).foregroundStyle(.white.opacity(0.78))
-            }
-        }
-        .frame(height: 170)
+        LakeIslandView(dragons: dragons, lakeLevel: lakeLevel)
     }
 
     private var todayMinutes: Int {
@@ -506,6 +506,17 @@ struct ContentView: View {
         return 1 - Double(remainingSeconds) / Double(sessionTotalSeconds)
     }
 
+    private var eggProgress: Double {
+        guard let egg = activeEgg else { return 0 }
+        let focusedSeconds: Double
+        if timerRunning && activeFocusRunning {
+            focusedSeconds = activeFocusElapsedSeconds + max(0, Date.now.timeIntervalSince1970 - activeFocusStartTime)
+        } else {
+            focusedSeconds = Double(egg.focusedSeconds)
+        }
+        return min(max(focusedSeconds / Double(max(egg.durationSeconds, 1)), 0), 1)
+    }
+
     private var timeString: String { String(format: "%02d:%02d", remainingSeconds / 60, remainingSeconds % 60) }
 
     private func toggleTimer() {
@@ -516,6 +527,10 @@ struct ContentView: View {
                 activeFocusElapsedSeconds = 0
                 activeFocusSessionStartTime = Date.now.timeIntervalSince1970
             }
+            if focusDurationMinutes == 60 && activeEgg == nil, let next = nextEggSpecies {
+                modelContext.insert(DragonEgg(speciesID: next.id))
+                try? modelContext.save()
+            }
             timerRunning = true
             activeFocusRunning = true
             activeFocusTotalSeconds = sessionTotalSeconds
@@ -523,6 +538,7 @@ struct ContentView: View {
             scheduleFocusNotification(after: remainingSeconds)
         } else {
             updateRemainingFromClock()
+            syncEggProgress()
             timerRunning = false
             activeFocusRunning = false
             activeFocusElapsedSeconds = Double(sessionTotalSeconds - remainingSeconds)
@@ -562,6 +578,7 @@ struct ContentView: View {
 
     private func finishSession() {
         updateRemainingFromClock()
+        syncEggProgress()
         let elapsedSeconds = max(1, sessionTotalSeconds - remainingSeconds)
         let elapsed = max(1, elapsedSeconds / 60)
         let earned = elapsed * 2
@@ -569,6 +586,13 @@ struct ContentView: View {
         modelContext.insert(FocusSession(startedAt: startedAt, durationMinutes: elapsed, xpEarned: earned))
         dragon?.addXP(earned)
         modelContext.insert(KingdomItem(kind: "lake", title: elapsed >= 20 ? "Crystal lagoon" : "Lake ripple"))
+        if let egg = activeEgg, eggProgress >= 1 {
+            egg.focusedSeconds = egg.durationSeconds
+            egg.hatched = true
+            if !dragons.contains(where: { $0.speciesID == egg.speciesID }) {
+                modelContext.insert(Dragon(name: egg.species.name, speciesID: egg.species.id, colorHex: egg.species.colorHex))
+            }
+        }
         let totalAfterSession = minutesFocused + elapsed
         for species in DragonSpecies.all where species.unlockMinutes <= totalAfterSession && !unlockedSpecies.contains(species.id) {
             modelContext.insert(Dragon(name: species.name, speciesID: species.id, colorHex: species.colorHex))
@@ -584,6 +608,13 @@ struct ContentView: View {
         sessionTotalSeconds = focusDurationMinutes * 60
         remainingSeconds = sessionTotalSeconds
         showingCompletion = true
+    }
+
+    private func syncEggProgress() {
+        guard let egg = activeEgg, sessionTotalSeconds == egg.durationSeconds else { return }
+        let elapsedSeconds = max(0, sessionTotalSeconds - remainingSeconds)
+        egg.focusedSeconds = min(egg.durationSeconds, elapsedSeconds)
+        try? modelContext.save()
     }
 
     private func scheduleFocusNotification(after seconds: Int) {
@@ -715,6 +746,179 @@ private struct CustomDurationView: View {
         }
         .navigationTitle("Custom Duration")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct EggHatchingCard: View {
+    let progress: Double
+    let species: DragonSpecies?
+    let isHatching: Bool
+    let focusDurationMinutes: Int
+    @State private var pulse = false
+
+    private var title: String {
+        if progress >= 1 { return "Dragon hatched!" }
+        if isHatching { return "Your egg is hatching" }
+        return species == nil ? "Your collection is complete" : "A new dragon awaits"
+    }
+
+    private var detail: String {
+        if progress >= 1 {
+            return "Welcome, \(species?.name ?? "new dragon"). Your island has a new resident."
+        }
+        if isHatching {
+            if progress < 0.25 { return "The shell is warming in the lake light." }
+            if progress < 0.60 { return "Hairline cracks are appearing. Keep focusing." }
+            if progress < 0.90 { return "Your dragon is stirring inside the shell." }
+            return "One last push. The hatchling is almost here!"
+        }
+        return "Choose exactly 60 minutes in Focus to start an egg hatching journey."
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse)
+                    .frame(width: 82, height: 92)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(DragonTheme.ink)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(DragonTheme.ink.opacity(0.62))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let species {
+                        Text(progress >= 1 ? species.name : "Next: \(species.name)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(DragonTheme.coralDark)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            ProgressView(value: progress)
+                .tint(progress >= 1 ? DragonTheme.mint : DragonTheme.coral)
+            HStack {
+                Text(progress >= 1 ? "Ready to explore" : isHatching ? "\(Int(progress * 100))% hatched" : "60-minute egg")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DragonTheme.ink.opacity(0.58))
+                Spacer()
+                if !isHatching && species != nil {
+                    Text("Focus tab →")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(DragonTheme.coralDark)
+                }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onAppear { pulse = true }
+        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulse)
+    }
+}
+
+private struct EggVisual: View {
+    let progress: Double
+    let dragonEmoji: String
+    let pulse: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(DragonTheme.gold.opacity(progress > 0 ? 0.22 : 0.12))
+                .blur(radius: 8)
+            Text(progress >= 1 ? dragonEmoji : "🥚")
+                .font(.system(size: progress >= 1 ? 52 : 60))
+                .scaleEffect(pulse && progress < 1 ? 1.05 : 1)
+                .rotationEffect(.degrees(progress > 0.62 && progress < 1 ? 4 : 0))
+            if progress >= 0.22 && progress < 1 {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 27, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .rotationEffect(.degrees(18))
+                    .offset(x: 5, y: 2)
+            }
+            if progress >= 0.66 && progress < 1 {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .rotationEffect(.degrees(-24))
+                    .offset(x: -12, y: -10)
+            }
+        }
+    }
+}
+
+private struct LakeIslandView: View {
+    let dragons: [Dragon]
+    let lakeLevel: Int
+    @State private var animate = false
+
+    private let dragonOffsets: [(CGFloat, CGFloat)] = [
+        (-88, 18), (-42, -12), (0, 12), (44, -14), (88, 18), (0, -38)
+    ]
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: 300, height: 180)
+                .offset(y: 36)
+            Ellipse()
+                .fill(Color(red: 0.26, green: 0.66, blue: 0.47))
+                .frame(width: 268, height: 92)
+                .offset(y: 40)
+            Ellipse()
+                .fill(Color(red: 0.40, green: 0.76, blue: 0.39))
+                .frame(width: 228, height: 66)
+                .offset(y: 28)
+            Text("🌳")
+                .font(.system(size: 44))
+                .offset(x: -76, y: 18)
+            Text("🌿")
+                .font(.system(size: 34))
+                .offset(x: 72, y: 24)
+            ForEach(Array(dragons.prefix(6).indices), id: \.self) { index in
+                let dragon = dragons[index]
+                let offset = dragonOffsets[index % dragonOffsets.count]
+                VStack(spacing: 0) {
+                    Text(dragon.species.emoji)
+                        .font(.system(size: index == 2 ? 39 : 32))
+                    Circle()
+                        .fill(.black.opacity(0.16))
+                        .frame(width: 25, height: 6)
+                        .blur(radius: 2)
+                }
+                .offset(x: offset.0, y: offset.1 + (animate ? -3 : 3))
+                .animation(.easeInOut(duration: 1.8 + Double(index) * 0.12).repeatForever(autoreverses: true), value: animate)
+            }
+            VStack {
+                HStack {
+                    Label("Azuremere Island", systemImage: "water.waves")
+                        .font(.headline.weight(.bold))
+                    Spacer()
+                    Text("Lv. \(lakeLevel)")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.22), in: Capsule())
+                }
+                .foregroundStyle(.white)
+                Spacer()
+                Text(dragons.isEmpty ? "Your island is waiting for its first dragon" : "\(dragons.count) dragon\(dragons.count == 1 ? "" : "s") roaming the island")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.bottom, 12)
+            }
+            .padding(16)
+        }
+        .frame(height: 250)
+        .clipped()
+        .onAppear { animate = true }
     }
 }
 

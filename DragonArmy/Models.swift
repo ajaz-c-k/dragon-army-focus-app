@@ -106,6 +106,32 @@ final class Dragon {
 }
 
 @Model
+final class DragonEgg {
+    var speciesID: String
+    var startedAt: Date
+    var durationSeconds: Int
+    var focusedSeconds: Int
+    var hatched: Bool
+
+    init(speciesID: String, durationSeconds: Int = 60 * 60) {
+        self.speciesID = speciesID
+        self.startedAt = .now
+        self.durationSeconds = durationSeconds
+        self.focusedSeconds = 0
+        self.hatched = false
+    }
+
+    var species: DragonSpecies {
+        DragonSpecies.all.first(where: { $0.id == speciesID }) ?? DragonSpecies.all[0]
+    }
+
+    var progress: Double {
+        guard durationSeconds > 0 else { return 1 }
+        return min(Double(focusedSeconds) / Double(durationSeconds), 1)
+    }
+}
+
+@Model
 final class FocusSession {
     var startedAt: Date
     var durationMinutes: Int

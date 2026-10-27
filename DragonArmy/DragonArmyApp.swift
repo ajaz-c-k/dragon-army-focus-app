@@ -7,6 +7,6 @@ struct DragonArmyApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [Dragon.self, FocusSession.self, KingdomItem.self])
+        .modelContainer(for: [Dragon.self, DragonEgg.self, FocusSession.self, KingdomItem.self])
     }
 }
