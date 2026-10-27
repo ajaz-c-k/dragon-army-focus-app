@@ -5,8 +5,19 @@ import UIKit
 struct DragonSceneView: View {
     let stage: DragonStage
     var colorHex: String = "E85D4A"
+    var speciesID: String = "ruby"
 
     private var dragonColor: Color { Color(hex: colorHex) }
+    private var wingColor: Color {
+        switch speciesID {
+        case "azure": return Color(red: 0.05, green: 0.30, blue: 0.58)
+        case "moss": return Color(red: 0.12, green: 0.35, blue: 0.20)
+        case "sunstone": return Color(red: 0.82, green: 0.34, blue: 0.05)
+        case "moon": return Color(red: 0.22, green: 0.12, blue: 0.42)
+        case "crystal": return Color(red: 0.05, green: 0.42, blue: 0.43)
+        default: return DragonTheme.coralDark
+        }
+    }
 
     var body: some View {
         RealityView { content in
@@ -51,14 +62,14 @@ struct DragonSceneView: View {
         }
 
         for x in [-0.23, 0.23] {
-            let horn = ModelEntity(mesh: .generateCone(height: 0.32, radius: 0.11), materials: [material(DragonTheme.coralDark)])
+            let horn = ModelEntity(mesh: .generateCone(height: 0.32, radius: 0.11), materials: [material(wingColor)])
             horn.position = [Float(x), 1.02, -0.04]
             horn.orientation = simd_quatf(angle: x < 0 ? -0.3 : 0.3, axis: [0, 0, 1])
             root.addChild(horn)
         }
 
         for x in [-0.82, 0.82] {
-            let wing = ModelEntity(mesh: .generateCone(height: 0.9, radius: 0.52), materials: [material(DragonTheme.coralDark)])
+            let wing = ModelEntity(mesh: .generateCone(height: 0.9, radius: 0.52), materials: [material(wingColor)])
             wing.position = [Float(x), 0.38, 0.12]
             wing.scale = [0.8, 0.35, 1.0]
             wing.orientation = simd_quatf(angle: x < 0 ? -0.55 : 0.55, axis: [0, 0, 1])

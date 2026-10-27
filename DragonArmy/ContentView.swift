@@ -20,6 +20,7 @@ struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("dragonExplorerName") private var explorerName = "Dragon Keeper"
     @State private var selectedTab = 0
+    @State private var selectedSpeciesID = "ruby"
     @State private var remainingSeconds = 25 * 60
     @State private var sessionTotalSeconds = 25 * 60
     @State private var timerRunning = false
@@ -28,6 +29,9 @@ struct ContentView: View {
     @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var dragon: Dragon? { dragons.first }
+    private var selectedDragon: Dragon? {
+        dragons.first(where: { $0.speciesID == selectedSpeciesID }) ?? dragon
+    }
     private var minutesFocused: Int { sessions.filter(\.completed).reduce(0) { $0 + $1.durationMinutes } }
     private var unlockedSpecies: Set<String> { Set(dragons.map(\.speciesID)) }
     private var activeEgg: DragonEgg? { eggs.first(where: { !$0.hatched }) }
@@ -336,8 +340,8 @@ struct ContentView: View {
                     }
                     .dragonCard()
 
-                    if let dragon {
-                        DragonSceneView(stage: dragon.stage, colorHex: dragon.colorHex)
+                    if let dragon = selectedDragon {
+                        DragonSceneView(stage: dragon.stage, colorHex: dragon.colorHex, speciesID: dragon.speciesID)
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -378,9 +382,26 @@ struct ContentView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Collection progress").font(.headline)
-                        ForEach(DragonSpecies.all) { species in
-                            DragonSpeciesRow(species: species, unlocked: unlockedSpecies.contains(species.id), minutesFocused: minutesFocused)
+                        HStack {
+                            Text("Dragon roster").font(.headline)
+                            Spacer()
+                            Text("Tap a dragon to inspect it")
+                                .font(.caption)
+                                .foregroundStyle(DragonTheme.ink.opacity(0.48))
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            ForEach(DragonSpecies.all) { species in
+                                let unlockedDragon = dragons.first(where: { $0.speciesID == species.id })
+                                DragonCollectionCard(
+                                    species: species,
+                                    dragon: unlockedDragon,
+                                    isSelected: selectedSpeciesID == species.id,
+                                    minutesFocused: minutesFocused
+                                ) {
+                                    guard unlockedDragon != nil else { return }
+                                    selectedSpeciesID = species.id
+                                }
+                            }
                         }
                     }
                     .dragonCard()
@@ -781,7 +802,7 @@ private struct TimerEggPanel: View {
         HStack(spacing: 12) {
             EggVisual(
                 progress: progress,
-                dragonEmoji: species?.emoji ?? "🐉",
+                species: species,
                 colorHex: species?.colorHex ?? "E5A83B",
                 isHatching: isRunning
             )
@@ -840,7 +861,7 @@ private struct EggHatchingCard: View {
             HStack(alignment: .top, spacing: 12) {
                 EggVisual(
                     progress: progress,
-                    dragonEmoji: species?.emoji ?? "🐉",
+                    species: species,
                     colorHex: species?.colorHex ?? "E5A83B",
                     isHatching: isHatching
                 )
@@ -885,7 +906,7 @@ private struct EggHatchingCard: View {
 
 private struct EggVisual: View {
     let progress: Double
-    let dragonEmoji: String
+    let species: DragonSpecies?
     let colorHex: String
     let isHatching: Bool
     @State private var wobble = false
@@ -896,8 +917,7 @@ private struct EggVisual: View {
                 .fill(Color(hex: colorHex).opacity(progress > 0 ? 0.22 : 0.14))
                 .blur(radius: 8)
             if progress >= 1 {
-                Text(dragonEmoji)
-                    .font(.system(size: 52))
+                DragonAvatarView(species: species ?? DragonSpecies.all[0], stage: .hatchling, size: 58, animated: true)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 ZStack {
@@ -1006,7 +1026,7 @@ private struct LakeIslandView: View {
             ForEach(Array(dragons.prefix(6).indices), id: \.self) { index in
                 let dragon = dragons[index]
                 let offset = dragonOffsets[index % dragonOffsets.count]
-                LakeDragonSprite(emoji: dragon.species.emoji, size: index == 2 ? 39 : 32, delay: Double(index) * 0.08)
+                LakeDragonSprite(dragon: dragon, size: index == 2 ? 54 : 46, delay: Double(index) * 0.08)
                     .offset(x: offset.0, y: offset.1)
             }
             VStack {
@@ -1035,18 +1055,17 @@ private struct LakeIslandView: View {
 }
 
 private struct LakeDragonSprite: View {
-    let emoji: String
+    let dragon: Dragon
     let size: CGFloat
     let delay: Double
     @State private var floating = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(emoji)
-                .font(.system(size: size))
+            DragonAvatarView(species: dragon.species, stage: dragon.stage, size: size, animated: true)
             Circle()
                 .fill(.black.opacity(0.16))
-                .frame(width: 25, height: 6)
+                .frame(width: size * 0.62, height: 6)
                 .blur(radius: 2)
         }
         .offset(y: floating ? -4 : 4)
@@ -1062,7 +1081,9 @@ private struct DragonSpeciesRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(unlocked ? species.emoji : "❔").font(.title2).frame(width: 36)
+            DragonAvatarView(species: species, stage: .hatchling, size: 48)
+                .grayscale(unlocked ? 0 : 1)
+                .opacity(unlocked ? 1 : 0.42)
             VStack(alignment: .leading, spacing: 3) {
                 Text(unlocked ? species.name : "Locked dragon").font(.subheadline.bold())
                 Text(unlocked ? species.description : "Unlock at \(species.unlockMinutes) focused minutes")
@@ -1076,6 +1097,216 @@ private struct DragonSpeciesRow: View {
                     .font(.caption.bold()).foregroundStyle(DragonTheme.coralDark)
             }
         }
+    }
+}
+
+private struct DragonCollectionCard: View {
+    let species: DragonSpecies
+    let dragon: Dragon?
+    let isSelected: Bool
+    let minutesFocused: Int
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                DragonAvatarView(
+                    species: species,
+                    stage: dragon?.stage ?? .hatchling,
+                    size: 106,
+                    animated: dragon != nil
+                )
+                .frame(maxWidth: .infinity)
+                .grayscale(dragon == nil ? 1 : 0)
+                .opacity(dragon == nil ? 0.42 : 1)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text(dragon?.name ?? "Locked dragon")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(DragonTheme.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: dragon == nil ? "lock.fill" : (isSelected ? "checkmark.circle.fill" : "arrow.up.right.circle"))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(dragon == nil ? DragonTheme.ink.opacity(0.3) : DragonTheme.coral)
+                }
+                Text(dragon == nil ? "Unlock at \(species.unlockMinutes) focused minutes" : species.name)
+                    .font(.caption)
+                    .foregroundStyle(DragonTheme.ink.opacity(0.55))
+                    .lineLimit(1)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(isSelected ? DragonTheme.coral.opacity(0.10) : Color.white.opacity(0.72))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(isSelected ? DragonTheme.coral.opacity(0.65) : .clear, lineWidth: 2)
+                    }
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(dragon == nil)
+        .accessibilityLabel(dragon == nil ? "Locked \(species.name) dragon" : "View \(dragon?.name ?? species.name)")
+    }
+}
+
+private struct DragonAvatarView: View {
+    let species: DragonSpecies
+    let stage: DragonStage
+    let size: CGFloat
+    var animated = false
+    @State private var breathing = false
+
+    private var baseColor: Color { Color(hex: species.colorHex) }
+    private var wingColor: Color {
+        switch species.id {
+        case "ruby": return Color(red: 0.53, green: 0.08, blue: 0.12)
+        case "azure": return Color(red: 0.05, green: 0.30, blue: 0.58)
+        case "moss": return Color(red: 0.12, green: 0.35, blue: 0.20)
+        case "sunstone": return Color(red: 0.82, green: 0.34, blue: 0.05)
+        case "moon": return Color(red: 0.22, green: 0.12, blue: 0.42)
+        default: return Color(red: 0.05, green: 0.42, blue: 0.43)
+        }
+    }
+    private var glowColor: Color {
+        switch species.id {
+        case "azure": return .cyan
+        case "moss": return .green
+        case "sunstone": return .yellow
+        case "moon": return .purple
+        case "crystal": return .mint
+        default: return DragonTheme.coral
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(glowColor.opacity(0.16))
+                .frame(width: size * 0.92, height: size * 0.92)
+                .blur(radius: size * 0.12)
+
+            DragonTailShape()
+                .fill(wingColor)
+                .frame(width: size * 0.42, height: size * 0.22)
+                .rotationEffect(.degrees(-22))
+                .offset(x: size * 0.30, y: size * 0.14)
+
+            DragonWingShape()
+                .fill(wingColor.gradient)
+                .frame(width: size * 0.42, height: size * 0.34)
+                .offset(x: -size * 0.28, y: size * 0.04)
+            DragonWingShape()
+                .fill(wingColor.gradient)
+                .frame(width: size * 0.42, height: size * 0.34)
+                .scaleEffect(x: -1, y: 1)
+                .offset(x: size * 0.28, y: size * 0.04)
+
+            Ellipse()
+                .fill(baseColor.gradient)
+                .frame(width: size * 0.53, height: size * 0.48)
+                .shadow(color: wingColor.opacity(0.30), radius: size * 0.08, y: size * 0.04)
+                .offset(y: size * 0.12)
+
+            Ellipse()
+                .fill(.white.opacity(0.16))
+                .frame(width: size * 0.20, height: size * 0.27)
+                .offset(x: -size * 0.08, y: size * 0.19)
+
+            Circle()
+                .fill(baseColor.gradient)
+                .frame(width: size * 0.42, height: size * 0.42)
+                .offset(y: -size * 0.12)
+
+            Triangle()
+                .fill(wingColor)
+                .frame(width: size * 0.11, height: size * 0.16)
+                .rotationEffect(.degrees(-12))
+                .offset(x: -size * 0.12, y: -size * 0.37)
+            Triangle()
+                .fill(wingColor)
+                .frame(width: size * 0.11, height: size * 0.16)
+                .rotationEffect(.degrees(12))
+                .offset(x: size * 0.12, y: -size * 0.37)
+
+            Capsule()
+                .fill(baseColor.opacity(0.86))
+                .frame(width: size * 0.24, height: size * 0.12)
+                .offset(y: size * 0.02)
+
+            HStack(spacing: size * 0.11) {
+                DragonEye(color: glowColor)
+                DragonEye(color: glowColor)
+            }
+            .offset(y: -size * 0.16)
+
+            speciesDetail
+                .offset(y: -size * 0.39)
+        }
+        .frame(width: size, height: size)
+        .scaleEffect(breathing ? 1.025 : 0.985)
+        .animation(animated ? .easeInOut(duration: 2.1).repeatForever(autoreverses: true) : nil, value: breathing)
+        .onAppear { if animated { breathing = true } }
+    }
+
+    @ViewBuilder private var speciesDetail: some View {
+        switch species.id {
+        case "sunstone":
+            Circle().stroke(.yellow.opacity(0.85), lineWidth: size * 0.025).frame(width: size * 0.34, height: size * 0.34)
+        case "moon":
+            Image(systemName: "moon.fill").font(.system(size: size * 0.18, weight: .bold)).foregroundStyle(.white.opacity(0.8))
+        case "crystal":
+            RoundedRectangle(cornerRadius: 3).fill(.white.opacity(0.72)).frame(width: size * 0.13, height: size * 0.13).rotationEffect(.degrees(45))
+        case "moss":
+            HStack(spacing: -size * 0.02) { Circle().fill(.green.opacity(0.85)); Circle().fill(.mint.opacity(0.85)); Circle().fill(.green.opacity(0.65)) }
+                .frame(width: size * 0.22, height: size * 0.10)
+        default:
+            Capsule().fill(.white.opacity(0.46)).frame(width: size * 0.12, height: size * 0.04)
+        }
+    }
+}
+
+private struct DragonEye: View {
+    let color: Color
+    var body: some View {
+        Circle().fill(.white).frame(width: 8, height: 8).overlay(Circle().fill(color).frame(width: 4, height: 4))
+    }
+}
+
+private struct DragonWingShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control1: CGPoint(x: rect.width * 0.36, y: rect.height * 0.12), control2: CGPoint(x: rect.width * 0.78, y: rect.height * 0.14))
+        path.addLine(to: CGPoint(x: rect.width * 0.78, y: rect.height * 0.58))
+        path.addLine(to: CGPoint(x: rect.width * 0.55, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.width * 0.34, y: rect.height * 0.62))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct DragonTailShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control1: CGPoint(x: rect.width * 0.38, y: rect.height * 0.12), control2: CGPoint(x: rect.width * 0.76, y: rect.height * 0.05))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.height * 0.42))
+        path.addCurve(to: CGPoint(x: rect.minX, y: rect.maxY), control1: CGPoint(x: rect.width * 0.68, y: rect.height * 0.75), control2: CGPoint(x: rect.width * 0.28, y: rect.height * 0.86))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -1128,7 +1359,7 @@ private struct LakeDragonCard: View {
 
     var body: some View {
         VStack(spacing: 7) {
-            Text(dragon.species.emoji).font(.system(size: 34))
+            DragonAvatarView(species: dragon.species, stage: dragon.stage, size: 70, animated: true)
             Text(dragon.name).font(.subheadline.bold()).foregroundStyle(DragonTheme.ink)
             Text(dragon.stage.title).font(.caption2).foregroundStyle(DragonTheme.coralDark)
         }
