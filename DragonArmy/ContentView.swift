@@ -30,6 +30,8 @@ struct ContentView: View {
     private var minutesFocused: Int { sessions.filter(\.completed).reduce(0) { $0 + $1.durationMinutes } }
     private var unlockedSpecies: Set<String> { Set(dragons.map(\.speciesID)) }
     private var activeEgg: DragonEgg? { eggs.first(where: { !$0.hatched }) }
+    private var latestEgg: DragonEgg? { eggs.first }
+    private var eggForDisplay: DragonEgg? { activeEgg ?? latestEgg }
     private var nextEggSpecies: DragonSpecies? {
         DragonSpecies.all.first(where: { !unlockedSpecies.contains($0.id) })
     }
@@ -264,6 +266,14 @@ struct ContentView: View {
                 }
             }
             .frame(height: 230)
+            if focusDurationMinutes == 60 || activeEgg != nil {
+                TimerEggPanel(
+                    progress: activeEgg == nil ? (latestEgg?.progress ?? 0) : eggProgress,
+                    species: activeEgg?.species ?? latestEgg?.species ?? nextEggSpecies,
+                    isRunning: timerRunning && activeEgg != nil,
+                    hasHatched: activeEgg == nil && latestEgg?.hatched == true
+                )
+            }
             Button(timerRunning ? "Pause focus" : "Start \(focusDurationMinutes)-minute focus") {
                 toggleTimer()
             }
@@ -397,8 +407,8 @@ struct ContentView: View {
                         }
                         lakeHero
                         EggHatchingCard(
-                            progress: eggProgress,
-                            species: activeEgg?.species ?? nextEggSpecies,
+                            progress: activeEgg == nil ? (latestEgg?.progress ?? 0) : eggProgress,
+                            species: eggForDisplay?.species ?? nextEggSpecies,
                             isHatching: activeEgg != nil,
                             focusDurationMinutes: focusDurationMinutes
                         )
@@ -428,7 +438,8 @@ struct ContentView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Azuremere Lake")
+            .navigationTitle("Lake")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
@@ -749,6 +760,49 @@ private struct CustomDurationView: View {
     }
 }
 
+private struct TimerEggPanel: View {
+    let progress: Double
+    let species: DragonSpecies?
+    let isRunning: Bool
+    let hasHatched: Bool
+    @State private var pulse = false
+
+    private var message: String {
+        if hasHatched { return "Hatched! Start another 60-minute flight for the next dragon." }
+        if isRunning { return "Your focus is cracking the shell. Keep going." }
+        return "A 60-minute focus flight hatches a new dragon."
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse)
+                .frame(width: 58, height: 66)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(hasHatched ? "Dragon unlocked" : "Egg mission")
+                        .font(.subheadline.weight(.bold))
+                    if let species {
+                        Text("· \(species.name)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(DragonTheme.coralDark)
+                    }
+                }
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(DragonTheme.ink.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+                ProgressView(value: progress)
+                    .tint(hasHatched ? DragonTheme.mint : DragonTheme.coral)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(DragonTheme.gold.opacity(0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onAppear { pulse = isRunning }
+        .onChange(of: isRunning) { _, running in pulse = running }
+    }
+}
+
 private struct EggHatchingCard: View {
     let progress: Double
     let species: DragonSpecies?
@@ -777,25 +831,26 @@ private struct EggHatchingCard: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            HStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
                 EggVisual(progress: progress, dragonEmoji: species?.emoji ?? "🐉", pulse: pulse)
-                    .frame(width: 82, height: 92)
+                    .frame(width: 76, height: 88)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
                         .font(.headline)
                         .foregroundStyle(DragonTheme.ink)
+                        .lineLimit(2)
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(DragonTheme.ink.opacity(0.62))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(3)
                     if let species {
                         Text(progress >= 1 ? species.name : "Next: \(species.name)")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(DragonTheme.coralDark)
                     }
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             ProgressView(value: progress)
@@ -804,7 +859,7 @@ private struct EggHatchingCard: View {
                 Text(progress >= 1 ? "Ready to explore" : isHatching ? "\(Int(progress * 100))% hatched" : "60-minute egg")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(DragonTheme.ink.opacity(0.58))
-                Spacer()
+                Spacer(minLength: 8)
                 if !isHatching && species != nil {
                     Text("Focus tab →")
                         .font(.caption.weight(.bold))

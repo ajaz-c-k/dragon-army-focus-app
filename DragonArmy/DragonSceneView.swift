@@ -39,9 +39,14 @@ struct DragonSceneView: View {
         head.position = [0, 0.62, -0.08]
         root.addChild(head)
 
+        let snout = ModelEntity(mesh: .generateSphere(radius: 0.24), materials: [material(dragonColor)])
+        snout.scale = [1.0, 0.72, 0.78]
+        snout.position = [0, 0.52, 0.38]
+        root.addChild(snout)
+
         for x in [-0.18, 0.18] {
             let eye = ModelEntity(mesh: .generateSphere(radius: 0.075), materials: [material(DragonTheme.gold)])
-            eye.position = [Float(x), 0.74, -0.49]
+            eye.position = [Float(x), 0.74, 0.42]
             root.addChild(eye)
         }
 
@@ -61,7 +66,7 @@ struct DragonSceneView: View {
         }
 
         let tail = ModelEntity(mesh: .generateCone(height: 1.15, radius: 0.25), materials: [material(dragonColor)])
-        tail.position = [0, -0.05, 0.95]
+        tail.position = [0, -0.05, -0.95]
         tail.orientation = simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
         root.addChild(tail)
         return root
