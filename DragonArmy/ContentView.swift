@@ -1182,8 +1182,9 @@ private struct DragonAvatarView: View {
 
     var body: some View {
         ZStack {
-            // Keep a quiet silhouette underneath while RealityKit prepares the 3D scene.
-            flatPreview.opacity(0.10)
+            // RealityKit can take a moment to initialize in a small grid cell.
+            // Keep the polished animated avatar visible while that happens.
+            flatPreview
             DragonMiniSceneView(
                 speciesID: species.id,
                 stage: stage,
