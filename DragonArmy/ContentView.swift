@@ -1118,7 +1118,7 @@ private struct DragonCollectionCard: View {
                 )
                 .frame(maxWidth: .infinity)
                 .grayscale(dragon == nil ? 1 : 0)
-                .opacity(dragon == nil ? 0.42 : 1)
+                .opacity(dragon == nil ? 0.68 : 1)
 
                 HStack(alignment: .firstTextBaseline) {
                     Text(dragon?.name ?? "Locked dragon")
@@ -1181,19 +1181,9 @@ private struct DragonAvatarView: View {
     }
 
     var body: some View {
-        ZStack {
-            // RealityKit can take a moment to initialize in a small grid cell.
-            // Keep the polished animated avatar visible while that happens.
-            flatPreview
-            DragonMiniSceneView(
-                speciesID: species.id,
-                stage: stage,
-                colorHex: species.colorHex,
-                size: size,
-                animated: animated
-            )
-        }
-        .frame(width: size, height: size)
+        // The roster uses a lightweight animated avatar. RealityKit remains in
+        // the large inspection preview, where it has room for a stable camera.
+        flatPreview
     }
 
     private var flatPreview: some View {
